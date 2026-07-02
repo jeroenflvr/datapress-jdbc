@@ -1,0 +1,42 @@
+# https://taskfile.dev
+version: '3'
+
+vars:
+  GRADLE: ./gradlew
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Format, compile, test, and build the shaded jar
+    cmds:
+      - "{{.GRADLE}} spotlessApply build"
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - "{{.GRADLE}} test"
+
+  publish:
+    desc: Publish the current version to Maven Central (Central Portal, USER_MANAGED)
+    cmds:
+      - "{{.GRADLE}} clean build publishAggregationToCentralPortal"
+
+  release:
+    desc: 'Bump version and publish to Maven Central. Usage: task release -- 0.1.0'
+    vars:
+      VERSION:
+        sh: echo '{{.CLI_ARGS}}' | tr -d '[:space:]' | sed 's/^v//'
+    preconditions:
+      - sh: test -n '{{.VERSION}}'
+        msg: "Version required. Usage: task release -- 0.1.0"
+      - sh: echo '{{.VERSION}}' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'
+        msg: "Invalid version '{{.VERSION}}'. Expected semver like 0.1.0"
+    cmds:
+      - echo "Releasing {{.VERSION}}"
+      - sed -i.bak -E 's/^version = ".*"$/version = "{{.VERSION}}"/' build.gradle.kts && rm -f build.gradle.kts.bak
+      - "{{.GRADLE}} clean build publishAggregationToCentralPortal"

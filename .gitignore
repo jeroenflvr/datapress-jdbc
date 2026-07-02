@@ -29,3 +29,6 @@ replay_pid*
 *.local
 .env
 .keys
+
+CLAUDE.md
+INSTRUCTIONS.md

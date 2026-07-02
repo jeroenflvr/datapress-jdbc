@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "org.datap-rs"
-version = "0.1.0-SNAPSHOT"
+version = "0.1.0"
 description = "Read-only Type-4 JDBC driver for DataPress|datap-rs"
 
 repositories {
