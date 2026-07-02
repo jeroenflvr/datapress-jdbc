@@ -3,13 +3,16 @@ import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
 plugins {
     `java-library`
     `maven-publish`
+    signing
     id("com.diffplug.spotless") version "6.25.0"
     id("com.gradleup.shadow") version "8.3.5"
+    id("com.gradleup.nmcp") version "1.6.1"
+    id("com.gradleup.nmcp.aggregation") version "1.6.1"
 }
 
 group = "org.datap-rs"
 version = "0.1.0-SNAPSHOT"
-description = "Read-only Type-4 JDBC driver for DataPress"
+description = "Read-only Type-4 JDBC driver for DataPress|datap-rs"
 
 repositories {
     mavenCentral()
@@ -37,6 +40,9 @@ dependencies {
     testImplementation("org.assertj:assertj-core:$assertjVersion")
     testImplementation("org.apache.arrow:arrow-memory-unsafe:$arrowVersion")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // Aggregate this project's own publications for the Central Portal upload.
+    nmcpAggregation(project(":"))
 }
 
 // -----------------------------------------------------------------------------
@@ -177,7 +183,51 @@ publishing {
                         url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
                     }
                 }
+                developers {
+                    developer {
+                        id.set("jeroenflvr")
+                        name.set("Jeroen Van Renterghem")
+                        email.set("jeroen@flexworks.eu")
+                        url.set("https://datap-rs.org")
+                        organization.set("datap-rs")
+                        organizationUrl.set("https://datap-rs.org")
+                    }
+                }
+                scm {
+                    connection.set("scm:git:https://github.com/jeroenflvr/datapress-jdbc.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/jeroenflvr/datapress-jdbc.git")
+                    url.set("https://github.com/jeroenflvr/datapress-jdbc")
+                }
             }
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Signing — uses the local GPG command via ~/.gradle/gradle.properties:
+//   signing.gnupg.keyName=<key fingerprint>
+//   useGpgCmd=true
+// Required whenever a publish task runs, so Central uploads are always signed.
+// -----------------------------------------------------------------------------
+signing {
+    useGpgCmd()
+    setRequired { gradle.taskGraph.allTasks.any { it.name.startsWith("publish") } }
+    sign(publishing.publications["shaded"])
+}
+
+// -----------------------------------------------------------------------------
+// Maven Central upload via the Central Portal publisher API (nmcp).
+// Credentials are a Central Portal *user token* (Account → Generate User Token),
+// read from ~/.gradle/gradle.properties:
+//   mavenCentralUsername=<token username>
+//   mavenCentralPassword=<token password>
+// Publish with:  ./gradlew publishAggregationToCentralPortal
+// USER_MANAGED = the deployment is staged; you click "Publish" in the portal UI.
+// -----------------------------------------------------------------------------
+nmcpAggregation {
+    centralPortal {
+        username = providers.gradleProperty("mavenCentralUsername")
+        password = providers.gradleProperty("mavenCentralPassword")
+        publishingType = "USER_MANAGED"
     }
 }
