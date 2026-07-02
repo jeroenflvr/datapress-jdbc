@@ -194,3 +194,59 @@ Running notes per phase: what was done, decisions made, open questions.
 - `DatabaseMetaData` catalog/schema (`datapress`/`main`) still to be confirmed against a real
   `information_schema` in Phase 4.
 
+## Phase 4 — DatabaseMetaData
+
+**Done**
+
+- `internal/meta/LikePattern`: SQL `LIKE` matcher (`%`, `_`, configurable escape) compiled to a
+  regex with per-character literal escaping so dataset names containing regex metacharacters
+  (`.`, `(`, `[`, `+`, `^`, `|`, …) match literally. `null` pattern ⇒ match-all, `""` ⇒ empty only,
+  wildcards match newlines (`DOTALL`). Heavy edge-case unit coverage in `LikePatternTest`.
+- `internal/meta/SyntheticResultSet`: forward-only, read-only in-memory `ResultSet` over
+  `List<Object[]>` + `Column` definitions, with a builder and a self-contained `ResultSetMetaData`
+  that is correct even for zero rows. Type-coercing getters (`getString`/`getInt`/`getLong`/
+  `getBoolean`/`getObject`/…), case-insensitive `findColumn`, `wasNull`, close semantics; all
+  navigation beyond `next()` and every update method throw `SQLFeatureNotSupportedException`.
+  Reused for every metadata result set.
+- `TypeMapping.ofServerType(name, sqlType, nullable)` + a string parser (`parseArrowType`) that
+  turns the schema endpoint's engine type renderings into an `ArrowType` and reuses the existing
+  `describe()` mapping — single source of truth. Handles `Int8/16/32/64`, `UInt*`, `Float16/32/64`,
+  `Decimal128/256(p, s)`, `Utf8`/`LargeUtf8`, `Binary`/`LargeBinary`/`FixedSizeBinary`,
+  `Date32/64`, `Time32/64(unit)`, `Timestamp(unit, None|Some("TZ"))`, `Dictionary(idx, value)`
+  (resolves to the value type — DataFusion emits strings this way), `Null`, and List/Struct/Map →
+  text fallback.
+- `HttpApi.getDatasets()` → `GET /api/v1/datasets` and `getDatasetSchema(name)` →
+  `GET /api/v1/datasets/{name}/schema` (percent-encoded path; 404 mapped via `Context.DATASET`).
+- `DataPressDatabaseMetaData` (full `java.sql.DatabaseMetaData`): fixed catalog `datapress` /
+  schema `main`; `getTables` (datasets → one `TABLE` row each, name filtered by `LikePattern`,
+  sorted, `types` filter honoured); `getColumns` (per-dataset schema fetch, types via
+  `TypeMapping`, column-name pattern, full 24-column layout); `getCatalogs`/`getSchemas`/
+  `getTableTypes`; `getTypeInfo` (static table of exactly the types the mapper emits); and
+  spec-correct **empty** result sets for keys/indexes/procedures/functions/UDTs/privileges/
+  best-row-identifier/version-columns/attributes/pseudo-columns/client-info. Conservative
+  capability flags (`supportsTransactions=false`, `supportsBatchUpdates=false`,
+  `allProceduresAreCallable=false`, `supportsSubqueriesInExists=true`, minimal `getSQLKeywords`,
+  no catalog/schema qualification). Product name `DataPress`, product version from the cached
+  `/version` handshake, driver version from `VersionInfo`. Wired `Connection.getMetaData()`.
+- Tests: `LikePatternTest`, `SyntheticResultSetTest`, `DataPressDatabaseMetaDataTest` (stub-backed;
+  asserts table/column mapping, patterns, empty result-set columns, `getTypeInfo`, and a reflective
+  sweep proving **every** `DatabaseMetaData` method is callable without throwing). Integration
+  `MetadataIT` round-trips `getTables`/`getColumns` against the live `people`/`types`/`numbers`
+  fixtures (all 14 `types` columns verified). `StubServer` extended with dataset + schema endpoints.
+- `docs/DBEAVER.md`: setup + smoke-test checklist for the shaded jar
+  (`build/libs/datapress-jdbc-0.1.0-SNAPSHOT.jar`).
+
+**Decisions / notes**
+
+- Metadata discovery uses the JSON `/datasets` + `/schema` endpoints (not Arrow); string columns'
+  `sql_type` is `Dictionary(Int32, Utf8)` under DataFusion and maps to `VARCHAR`.
+- `getColumns` for a table pattern matching many datasets issues N schema calls (acceptable for
+  now; add a small TTL cache only if it proves slow).
+- Full build green (`./gradlew build`); integration green on port 18080
+  (`MetadataIT` 6/6, suite 18/18).
+
+**Open questions**
+
+- DBeaver tree-view/data-preview smoke test (per `docs/DBEAVER.md`) awaiting user confirmation.
+
+

@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -81,6 +82,66 @@ public final class HttpApi implements AutoCloseable {
             .build();
     HttpResponse<String> response = sendString(request, "GET /readyz");
     return response.statusCode() == 200;
+  }
+
+  /**
+   * Lists datasets: {@code GET /api/v1/datasets}. Used by {@code DatabaseMetaData.getTables}.
+   *
+   * @return the parsed JSON body (an object with a {@code datasets} array)
+   * @throws SQLException on any non-200 response or transport/parse failure
+   */
+  public JsonNode getDatasets() throws SQLException {
+    HttpRequest request =
+        baseRequest(config.endpoint("/api/v1/datasets"), config.socketTimeoutMs())
+            .header("Accept", "application/json")
+            .GET()
+            .build();
+    HttpResponse<String> response = sendString(request, "GET /api/v1/datasets");
+    if (response.statusCode() != 200) {
+      throw SqlErrors.fromHttpStatus(
+          response.statusCode(), parseErrorBody(response.body()), SqlErrors.Context.GENERIC);
+    }
+    return readTree(response.body(), "/api/v1/datasets");
+  }
+
+  /**
+   * Fetches a dataset schema: {@code GET /api/v1/datasets/{name}/schema}. Used by {@code
+   * DatabaseMetaData.getColumns}. An unknown dataset maps to a {@code 404} in {@link
+   * SqlErrors.Context#DATASET}.
+   *
+   * @param dataset the dataset name (percent-encoded into the path)
+   * @return the parsed JSON schema body
+   * @throws SQLException on any non-200 response or transport/parse failure
+   */
+  public JsonNode getDatasetSchema(String dataset) throws SQLException {
+    String path = "/api/v1/datasets/" + encodePathSegment(dataset) + "/schema";
+    HttpRequest request =
+        baseRequest(config.endpoint(path), config.socketTimeoutMs())
+            .header("Accept", "application/json")
+            .GET()
+            .build();
+    HttpResponse<String> response = sendString(request, "GET " + path);
+    if (response.statusCode() != 200) {
+      throw SqlErrors.fromHttpStatus(
+          response.statusCode(), parseErrorBody(response.body()), SqlErrors.Context.DATASET);
+    }
+    return readTree(response.body(), path);
+  }
+
+  private static JsonNode readTree(String body, String what) throws SQLException {
+    try {
+      return MAPPER.readTree(body);
+    } catch (IOException e) {
+      throw SqlErrors.connectFailure("could not parse " + what + " response", e);
+    }
+  }
+
+  private static String encodePathSegment(String segment) {
+    try {
+      return URLEncoder.encode(segment, "UTF-8").replace("+", "%20");
+    } catch (java.io.UnsupportedEncodingException e) {
+      return segment; // UTF-8 is always available
+    }
   }
 
   /** Arrow IPC stream media type (verified against the server, see docs/CONTRACT.md). */

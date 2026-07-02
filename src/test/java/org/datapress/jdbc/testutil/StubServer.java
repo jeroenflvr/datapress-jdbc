@@ -9,6 +9,8 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,6 +40,9 @@ public final class StubServer implements AutoCloseable {
   private final AtomicInteger readyzHits = new AtomicInteger();
   private final AtomicInteger sqlHits = new AtomicInteger();
 
+  private volatile String datasetsBody = "{\"datasets\":[]}";
+  private final Map<String, String> schemaBodies = new ConcurrentHashMap<>();
+
   private StubServer(HttpServer server) {
     this.server = server;
   }
@@ -48,6 +53,7 @@ public final class StubServer implements AutoCloseable {
     server.createContext("/version", stub::handleVersion);
     server.createContext("/readyz", stub::handleReadyz);
     server.createContext("/api/v1/sql", stub::handleSql);
+    server.createContext("/api/v1/datasets", stub::handleDatasets);
     server.setExecutor(null);
     server.start();
     return stub;
@@ -84,6 +90,16 @@ public final class StubServer implements AutoCloseable {
     this.sqlStatus = status;
     this.sqlBody = jsonBody == null ? new byte[0] : jsonBody.getBytes(StandardCharsets.UTF_8);
     this.sqlContentType = "application/json";
+  }
+
+  /** Configure the JSON body returned by {@code GET /api/v1/datasets}. */
+  public void setDatasets(String jsonBody) {
+    this.datasetsBody = jsonBody;
+  }
+
+  /** Register a schema JSON body for {@code GET /api/v1/datasets/{name}/schema}. */
+  public void putSchema(String dataset, String jsonBody) {
+    schemaBodies.put(dataset, jsonBody);
   }
 
   public String lastSqlRequestBody() {
@@ -133,6 +149,28 @@ public final class StubServer implements AutoCloseable {
     lastSqlAccept.set(accept == null || accept.isEmpty() ? null : accept.get(0));
     lastSqlRequestBody.set(readBody(exchange.getRequestBody()));
     respondBytes(exchange, sqlStatus, sqlBody, sqlContentType);
+  }
+
+  private void handleDatasets(HttpExchange exchange) throws IOException {
+    captureHeaders(exchange);
+    String path = exchange.getRequestURI().getPath();
+    if (path.equals("/api/v1/datasets") || path.equals("/api/v1/datasets/")) {
+      respond(exchange, 200, datasetsBody);
+      return;
+    }
+    // Expect /api/v1/datasets/{name}/schema
+    String rest = path.substring("/api/v1/datasets/".length());
+    if (rest.endsWith("/schema")) {
+      String name = rest.substring(0, rest.length() - "/schema".length());
+      String body = schemaBodies.get(name);
+      if (body != null) {
+        respond(exchange, 200, body);
+        return;
+      }
+      respond(exchange, 404, "{\"error\":\"not found: dataset: " + name + "\"}");
+      return;
+    }
+    respond(exchange, 404, "{\"error\":\"not found\"}");
   }
 
   private static String readBody(InputStream in) throws IOException {

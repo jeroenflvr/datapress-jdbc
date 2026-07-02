@@ -334,7 +334,7 @@ public final class DataPressConnection implements Connection {
   @Override
   public DatabaseMetaData getMetaData() throws SQLException {
     checkOpen();
-    throw SqlErrors.unsupported("getMetaData");
+    return new DataPressDatabaseMetaData(this);
   }
 
   // --- Holdability ----------------------------------------------------------------------------
