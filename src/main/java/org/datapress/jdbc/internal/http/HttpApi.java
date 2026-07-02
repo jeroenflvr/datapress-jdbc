@@ -2,11 +2,15 @@ package org.datapress.jdbc.internal.http;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.Duration;
 import org.datapress.jdbc.internal.util.ConnectionConfig;
@@ -77,6 +81,74 @@ public final class HttpApi implements AutoCloseable {
             .build();
     HttpResponse<String> response = sendString(request, "GET /readyz");
     return response.statusCode() == 200;
+  }
+
+  /** Arrow IPC stream media type (verified against the server, see docs/CONTRACT.md). */
+  private static final String ARROW_MEDIA_TYPE = "application/vnd.apache.arrow.stream";
+
+  /**
+   * Executes a read-only SQL statement and returns the Arrow IPC response body as a lazily-read
+   * stream. The caller owns the stream and must close it (the {@code ResultSet} does).
+   *
+   * @param sql the statement text (already fully rendered; no server-side binding)
+   * @param maxRows the {@code max_rows} cap to request; {@code 0} omits the field (server default)
+   * @return the response {@link InputStream} positioned at the start of the Arrow stream
+   * @throws SQLException with a mapped SQLState on any non-200 response or transport failure
+   */
+  public InputStream executeSql(String sql, int maxRows) throws SQLException {
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("sql", sql);
+    if (maxRows > 0) {
+      payload.put("max_rows", maxRows);
+    }
+    String body;
+    try {
+      body = MAPPER.writeValueAsString(payload);
+    } catch (IOException e) {
+      throw SqlErrors.connectFailure("could not encode SQL request body", e);
+    }
+    HttpRequest request =
+        baseRequest(config.endpoint("/api/v1/sql"), config.socketTimeoutMs())
+            .header("Accept", ARROW_MEDIA_TYPE)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+            .build();
+    HttpResponse<InputStream> response = sendStream(request, "POST /api/v1/sql");
+    if (response.statusCode() != 200) {
+      String message = parseErrorBody(drain(response.body()));
+      throw SqlErrors.fromHttpStatus(
+          response.statusCode(), message, SqlErrors.Context.SQL_ENDPOINT);
+    }
+    return response.body();
+  }
+
+  private HttpResponse<InputStream> sendStream(HttpRequest request, String what)
+      throws SQLException {
+    try {
+      return client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    } catch (IOException e) {
+      throw SqlErrors.connectFailure(what + " failed (" + e.getMessage() + ")", e);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw SqlErrors.connectFailure(what + " was interrupted", null);
+    }
+  }
+
+  private static String drain(InputStream in) {
+    try (InputStream stream = in) {
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      byte[] buf = new byte[4096];
+      int n;
+      while ((n = stream.read(buf)) != -1) {
+        out.write(buf, 0, n);
+        if (out.size() > 64 * 1024) {
+          break; // error bodies are tiny; cap defensively
+        }
+      }
+      return out.toString("UTF-8");
+    } catch (IOException e) {
+      return null;
+    }
   }
 
   private HttpRequest.Builder baseRequest(URI uri, int timeoutMs) {

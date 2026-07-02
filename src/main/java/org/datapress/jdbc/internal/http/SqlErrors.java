@@ -1,6 +1,7 @@
 package org.datapress.jdbc.internal.http;
 
 import java.io.IOException;
+import java.sql.SQLDataException;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.SQLInvalidAuthorizationSpecException;
@@ -27,6 +28,8 @@ public final class SqlErrors {
   private static final String SQLSTATE_BAD_TABLE = "42S02";
   private static final String SQLSTATE_TRANSIENT = "57014";
   private static final String SQLSTATE_SERVER = "58000";
+  private static final String SQLSTATE_NUMERIC_OVERFLOW = "22003";
+  private static final String SQLSTATE_DATA_CONVERSION = "22018";
 
   /** Disambiguates how a {@code 404} should be interpreted for a given endpoint. */
   public enum Context {
@@ -67,6 +70,16 @@ public final class SqlErrors {
     return new SQLFeatureNotSupportedException(
         "SQL endpoint disabled on server — set [sql].enabled=true in the DataPress config",
         SQLSTATE_FEATURE_NOT_SUPPORTED);
+  }
+
+  /** A numeric getter overflowed the requested Java type (JDBC {@code 22003}). */
+  public static SQLDataException numericOverflow(String detail) {
+    return new SQLDataException(detail, SQLSTATE_NUMERIC_OVERFLOW);
+  }
+
+  /** A value could not be converted to the requested type (JDBC {@code 22018}). */
+  public static SQLDataException dataConversion(String detail) {
+    return new SQLDataException(detail, SQLSTATE_DATA_CONVERSION);
   }
 
   /**

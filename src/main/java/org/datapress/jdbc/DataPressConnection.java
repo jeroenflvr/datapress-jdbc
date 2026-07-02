@@ -19,7 +19,11 @@ import java.sql.Struct;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
 import org.datapress.jdbc.internal.http.HttpApi;
 import org.datapress.jdbc.internal.http.ServerVersion;
 import org.datapress.jdbc.internal.http.SqlErrors;
@@ -42,6 +46,8 @@ public final class DataPressConnection implements Connection {
   private final HttpApi http;
   private final ServerVersion serverVersion;
   private final Properties clientInfo = new Properties();
+  private final BufferAllocator rootAllocator = new RootAllocator();
+  private final Set<DataPressStatement> openStatements = ConcurrentHashMap.newKeySet();
 
   private volatile boolean closed = false;
 
@@ -65,6 +71,15 @@ public final class DataPressConnection implements Connection {
     return serverVersion;
   }
 
+  BufferAllocator allocator() {
+    return rootAllocator;
+  }
+
+  /** Callback from {@link DataPressStatement#close()} so the connection can drop its reference. */
+  void statementClosed(DataPressStatement statement) {
+    openStatements.remove(statement);
+  }
+
   private void checkOpen() throws SQLException {
     if (closed) {
       throw SqlErrors.closed("Connection");
@@ -79,6 +94,11 @@ public final class DataPressConnection implements Connection {
       return;
     }
     closed = true;
+    for (DataPressStatement statement : openStatements) {
+      statement.close();
+    }
+    openStatements.clear();
+    rootAllocator.close();
     http.close();
   }
 
@@ -216,7 +236,11 @@ public final class DataPressConnection implements Connection {
   @Override
   public Statement createStatement() throws SQLException {
     checkOpen();
-    throw SqlErrors.unsupported("createStatement");
+    BufferAllocator statementAllocator =
+        rootAllocator.newChildAllocator("statement", 0, Long.MAX_VALUE);
+    DataPressStatement statement = new DataPressStatement(this, statementAllocator);
+    openStatements.add(statement);
+    return statement;
   }
 
   @Override

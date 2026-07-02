@@ -96,3 +96,40 @@ Running notes per phase: what was done, decisions made, open questions.
 
 - None new; Phase 3/4 open questions from Phase 0 still stand (dataset/schema JSON shapes,
   auth feature in the Docker image).
+
+## Phase 2 — Statement + streaming Arrow ResultSet
+
+**What**
+
+- `HttpApi.executeSql(sql, maxRows)`: `POST /api/v1/sql` with body `{"sql":…,"max_rows":N}`
+  (`max_rows` omitted when 0) and `Accept: application/vnd.apache.arrow.stream`. Non-200 responses
+  are drained and mapped via `SqlErrors.fromHttpStatus(…, Context.SQL_ENDPOINT)` so a disabled SQL
+  endpoint (404) surfaces as `0A000`; 200 returns the raw `InputStream` for streaming.
+- `internal.arrow` layer: `TypeMapping`/`ColumnMeta` (Arrow `Field` → JDBC type facts),
+  `ValueAccessor`/`ValueAccessors` (per-vector decode to canonical Java objects, incl. Utf8View /
+  BinaryView, unsigned ints, tz/tz-less timestamps), `Convert` (spec widening/narrowing; range
+  errors → `22003`, unparseable → `22018`), and `ArrowResultIterator` (streaming `ArrowStreamReader`
+  wrapper — one batch resident, vectors reused across `loadNextBatch()`).
+- `DataPressResultSet` (`java.sql.ResultSet`): forward-only, read-only. All typed getters + `getObject`,
+  `wasNull`, `Calendar` variants, case-insensitive `findColumn`, `DataPressResultSetMetaData`. Every
+  navigation beyond `next()`/`close()` and all update methods raise `0A000`.
+- `DataPressStatement` (`java.sql.Statement`): `executeQuery`/`execute` stream a result set;
+  `setMaxRows` feeds `max_rows`; every update-shaped call raises `0A000`.
+- Allocator lifecycle: `RootAllocator` per `Connection` → child per `Statement` → grandchild per
+  `ResultSet`. Close cascades (Connection → Statement → ResultSet) release every buffer;
+  leak-checked via `getAllocatedMemory() == 0`.
+
+**Decisions**
+
+- `internal.arrow.Convert` is `public` because the getters live in the public `org.datapress.jdbc`
+  package; the rest of the arrow layer is package-scoped where possible.
+- `Statement.execute(sql, …)` overloads delegate to `execute(sql)` (read-only, no generated keys);
+  `getGeneratedKeys`/batch/named cursors raise `0A000`. `cancel()` is a no-op (streaming HTTP).
+- Constant-memory streaming verified by asserting the connection root allocator's resident bytes are
+  identical across three equally-sized batches and `0` after `ResultSet.close()` — no whole-stream
+  buffering.
+
+**Open questions**
+
+- None new. Timestamp-with-timezone currently decodes to `OffsetDateTime`; revisit `getTimestamp`
+  calendar semantics if server tz metadata differs from the verified contract.
