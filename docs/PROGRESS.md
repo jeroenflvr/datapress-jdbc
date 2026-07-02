@@ -52,3 +52,47 @@ Running notes per phase: what was done, decisions made, open questions.
 - Confirm fixed catalog/schema names (`datapress` / `main`) for `DatabaseMetaData`.
 - Whether the Docker image ships the `auth` feature and how to set a static test token vs. a
   full OIDC flow for integration tests.
+
+## Phase 1 — Driver, URL parsing, Connection, HTTP handshake
+
+**Done**
+
+- `DataPressDriver` (`java.sql.Driver`): static `DriverManager` registration + a
+  `META-INF/services/java.sql.Driver` provider file for `ServiceLoader`. `connect()` returns
+  `null` for foreign URLs, otherwise parses the config, opens an `HttpApi`, performs the
+  `GET /version` handshake, and returns a `DataPressConnection` (closing the transport on
+  failure). `jdbcCompliant()` is `false`; `getParentLogger()` throws.
+- `UrlParser` / `ConnectionConfig`: parse `jdbc:datapress://…`, `jdbc:datapress:http://…`,
+  and `jdbc:datapress:https://…` (https ⇒ TLS). Resolves host/port (default `8000`), TLS,
+  token (`token`/`password` aliases, URL-decoded), `connectTimeout`, `socketTimeout`,
+  `maxRows`, and `applicationName`. Precedence: `Properties` win over URL query. `user` is
+  accepted-but-ignored. Malformed URL/port/boolean/int ⇒ `SQLNonTransientConnectionException`
+  (`08001`). `ConnectionConfig.toString()` redacts the token.
+- `HttpApi`: thin wrapper over the JDK `HttpClient` — bearer auth, `User-Agent`
+  (`datapress-jdbc/<version>` + optional `(<appName>)`), per-call timeouts. `getVersion()` and
+  `isReady()` (readiness probe backing `isValid`). Transport failures funnel through `SqlErrors`.
+- `SqlErrors`: centralised HTTP-status → `SQLException` mapping with a `Context`
+  (`GENERIC`/`SQL_ENDPOINT`/`DATASET`) to disambiguate `404`.
+- `DataPressConnection` (`java.sql.Connection`): read-only, non-transactional. `autoCommit=true`
+  only, `TRANSACTION_NONE`, `isReadOnly()=true`, `commit()`/`rollback()` are silent no-ops so
+  pools don't break, `setReadOnly(false)`/`setAutoCommit(false)` are rejected. Fixed catalog
+  `datapress` / schema `main`. `createStatement`/`prepareStatement`/`getMetaData` throw
+  `SQLFeatureNotSupportedException` **temporarily** — to be implemented in Phases 2/4/5.
+- Tests: URL/property parsing matrix, `acceptsURL` negatives, the full error-mapping table,
+  driver registration + `getPropertyInfo`, and a `com.sun.net.httpserver`-based `StubServer`
+  proving `DriverManager.getConnection` connects, sends `Bearer`/`User-Agent`, reflects
+  `/readyz` in `isValid`, and enforces closed/read-only semantics.
+
+**Decisions**
+
+- `isValid(negative)` throws (per the JDBC contract); on a closed connection it returns `false`.
+  `isValid` is backed by `GET /readyz` (200 ⇒ valid), and any transport error ⇒ `false`.
+- `SQLException` implements `Iterable<Throwable>`, so AssertJ's `assertThat(SQLException)` is
+  ambiguous — tests cast to `(Throwable)` for `isInstanceOf`/cause assertions.
+- `HttpApi.close()` is a no-op: the JDK `HttpClient` has no `close()` on Java 11–20; the Arrow
+  allocator lifecycle will be owned by `Connection`/`Statement` in Phase 2.
+
+**Open questions**
+
+- None new; Phase 3/4 open questions from Phase 0 still stand (dataset/schema JSON shapes,
+  auth feature in the Docker image).
