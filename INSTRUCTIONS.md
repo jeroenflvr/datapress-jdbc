@@ -33,7 +33,7 @@ document the decision in `docs/PROGRESS.md`, and proceed.
    section (Java 11 target, shadow plugin, spotless, dependencies), `.editorconfig`,
    `.gitignore`, Apache-2.0 `LICENSE`, minimal `README.md` (what it is, status: pre-alpha),
    `CLAUDE.md` pointing future sessions at the skill and `docs/CONTRACT.md`, and empty package
-   skeleton `org.datapress.jdbc` / `org.datapress.jdbc.internal.*`.
+   skeleton `org.datap_rs.jdbc` / `org.datap_rs.jdbc.internal.*`.
 4. GitHub Actions: `ci.yml` running spotless + build + unit tests on JDK 11/17/21.
 
 **Accept when:** `./gradlew build` succeeds on a clean clone; CONTRACT.md exists and cites the

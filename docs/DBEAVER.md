@@ -32,12 +32,12 @@ This serves the `people`, `types`, and `numbers` fixtures at
 1. **Database → Driver Manager → New**.
 2. Settings:
    - **Driver Name:** `DataPress`
-   - **Class Name:** `org.datapress.jdbc.DataPressDriver`
+   - **Class Name:** `org.datap_rs.jdbc.DataPressDriver`
    - **URL Template:** `jdbc:datapress://{host}:{port}/`
    - **Default Port:** `18080`
 3. **Libraries → Add File** → select
    `build/libs/datapress-jdbc-0.1.0-SNAPSHOT.jar`.
-4. **Find Class** should resolve `org.datapress.jdbc.DataPressDriver`. Click **OK**.
+4. **Find Class** should resolve `org.datap_rs.jdbc.DataPressDriver`. Click **OK**.
 
 ## 4. Create a connection
 

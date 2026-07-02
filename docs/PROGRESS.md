@@ -14,7 +14,7 @@ Running notes per phase: what was done, decisions made, open questions.
   documented location `.claude/skills/datapress-jdbc/SKILL.md`.
 - Scaffolded the repo: Gradle Kotlin DSL build (`java-library`, shadow, spotless, maven-publish),
   `.editorconfig`, `.gitignore`, Apache-2.0 `LICENSE`, pre-alpha `README.md`, `CLAUDE.md`,
-  and the `org.datapress.jdbc` / `internal.*` package skeleton with a build-generated
+  and the `org.datap_rs.jdbc` / `internal.*` package skeleton with a build-generated
   `VersionInfo` (driver version sourced from the Gradle project version).
 - Added `.github/workflows/ci.yml`: spotless check + build/test matrix on JDK 11/17/21.
 
@@ -121,7 +121,7 @@ Running notes per phase: what was done, decisions made, open questions.
 
 **Decisions**
 
-- `internal.arrow.Convert` is `public` because the getters live in the public `org.datapress.jdbc`
+- `internal.arrow.Convert` is `public` because the getters live in the public `org.datap_rs.jdbc`
   package; the rest of the arrow layer is package-scoped where possible.
 - `Statement.execute(sql, …)` overloads delegate to `execute(sql)` (read-only, no generated keys);
   `getGeneratedKeys`/batch/named cursors raise `0A000`. `cancel()` is a no-op (streaming HTTP).

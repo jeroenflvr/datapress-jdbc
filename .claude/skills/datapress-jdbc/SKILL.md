@@ -132,10 +132,10 @@ server version string.
 
 ## Architecture and package layout
 
-Package root `org.datapress.jdbc`. Public JDBC classes at the root, internals under `internal`.
+Package root `org.datap_rs.jdbc`. Public JDBC classes at the root, internals under `internal`.
 
 ```
-org.datapress.jdbc
+org.datap_rs.jdbc
 ├── DataPressDriver
 ├── DataPressConnection
 ├── DataPressStatement
@@ -276,13 +276,13 @@ Two layers, cleanly separated:
   Arrow deprecates it), Jackson (`jackson-databind`) only for metadata JSON, JUnit 5 + AssertJ
   for tests. Nothing else without good reason.
 - **Shading**: relocate `org.apache.arrow`, `com.fasterxml.jackson`, `com.google.flatbuffers`
-  and any other transitive deps under `org.datapress.jdbc.internal.shaded.*`. Merge/exclude
+  and any other transitive deps under `org.datap_rs.jdbc.internal.shaded.*`. Merge/exclude
   `META-INF` correctly but **preserve `META-INF/services/java.sql.Driver`**. The published
   artifact is the shaded jar; a thin jar can be a classifier.
 - **JPMS/JDK 16+ gotcha**: Arrow memory needs `--add-opens=java.base/java.nio=ALL-UNNAMED`.
   Add to test `jvmArgs`, document prominently in README (DBeaver/Tableau users hit this), and
   detect the failure at runtime to throw a friendly `SQLException` explaining the flag.
-- `Automatic-Module-Name: org.datapress.jdbc` in the manifest.
+- `Automatic-Module-Name: org.datap_rs.jdbc` in the manifest.
 - Version handshake: driver sends `User-Agent: datapress-jdbc/<version>`; keep driver version in
   one place (Gradle) and generate `VersionInfo` at build time.
 - Maven Central publishing (`org.datap-rs:datapress-jdbc` or as the owner decides): separate,

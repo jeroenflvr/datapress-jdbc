@@ -97,7 +97,7 @@ val generateVersionInfo =
         inputs.property("version", versionValue)
         outputs.dir(outputDir)
         doLast {
-            val dir = outputDir.get().asFile.resolve("org/datapress/jdbc/internal/util")
+            val dir = outputDir.get().asFile.resolve("org/datap_rs/jdbc/internal/util")
             dir.mkdirs()
             dir.resolve("datapress-jdbc-version.properties").writeText(
                 "version=$versionValue\n",
@@ -132,7 +132,7 @@ spotless {
 // -----------------------------------------------------------------------------
 tasks.named<ShadowJar>("shadowJar") {
     archiveClassifier.set("")
-    val shadeBase = "org.datapress.jdbc.internal.shaded"
+    val shadeBase = "org.datap_rs.jdbc.internal.shaded"
     relocate("org.apache.arrow", "$shadeBase.org.apache.arrow")
     relocate("com.fasterxml.jackson", "$shadeBase.com.fasterxml.jackson")
     relocate("com.google.flatbuffers", "$shadeBase.com.google.flatbuffers")
@@ -142,7 +142,7 @@ tasks.named<ShadowJar>("shadowJar") {
 
     manifest {
         attributes(
-            "Automatic-Module-Name" to "org.datapress.jdbc",
+            "Automatic-Module-Name" to "org.datap_rs.jdbc",
             "Implementation-Title" to "datapress-jdbc",
             "Implementation-Version" to project.version.toString(),
         )

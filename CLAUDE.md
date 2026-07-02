@@ -20,7 +20,7 @@ affected test together in one commit.
 - Work in phases (see `INSTRUCTIONS.md`). End each phase with: tests green,
   `./gradlew build` clean, a conventional commit, and a note appended to `docs/PROGRESS.md`.
 - Never weaken a test to make it pass. Fix the driver, or fix the contract + skill + test together.
-- Public API surface = `java.sql` only. Everything else lives under `org.datapress.jdbc.internal`.
+- Public API surface = `java.sql` only. Everything else lives under `org.datap_rs.jdbc.internal`.
 - Prefer boring, explicit Java. No reflection tricks, no annotation processors, no Lombok.
 
 ## Common commands
