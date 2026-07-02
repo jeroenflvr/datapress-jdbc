@@ -1,0 +1,33 @@
+# DataPress server config for the JDBC integration tests.
+#
+# Consumed by docker-compose.yml / scripts/run-server.sh. Dataset locations refer to
+# the fixtures directory mounted at /fixtures inside the container. The backend line
+# is rewritten by scripts/run-server.sh when running the DuckDB matrix leg.
+
+[server]
+backend = "datafusion"   # or "duckdb"; run-server.sh overrides this
+listen  = "0.0.0.0"      # must be reachable via the published port
+port    = 8080
+
+# Raw SQL endpoint — required by the driver; off by default on the server.
+[sql]
+enabled  = true
+max_rows = 10000         # server-side hard cap; exercised by the max_rows clamp test
+
+[[dataset]]
+name = "people"
+  [dataset.source]
+  kind     = "parquet"
+  location = "/fixtures/people.parquet"
+
+[[dataset]]
+name = "types"
+  [dataset.source]
+  kind     = "parquet"
+  location = "/fixtures/types.parquet"
+
+[[dataset]]
+name = "numbers"
+  [dataset.source]
+  kind     = "parquet"
+  location = "/fixtures/numbers.parquet"

@@ -78,9 +78,17 @@ Result formats:
   `application/vnd.apache.arrow.stream` is **verified**. The response also carries an
   `X-Max-Rows` header echoing the applied cap. An empty result is a valid stream with the schema
   message only and zero batches (so column metadata is always available).
-- **Backend type quirk:** DataFusion emits Arrow `Utf8View`/`BinaryView` for Parquet string/
-  binary columns; DuckDB does not. `TypeMapping` must treat `Utf8View` as `VARCHAR` and
-  `BinaryView` as `VARBINARY`, and the bundled `arrow-vector` must be new enough to decode them.
+- **Backend type quirk:** DataFusion **dictionary-encodes string columns** — the SQL Arrow
+  stream carries `Dictionary(Int32, Utf8)`, so a column's `Field.getType()` is the *index* type
+  (`Int32`), not `Utf8`. Metadata mapping must resolve the dictionary *value* type via
+  `TypeMapping.of(Field, DictionaryProvider)` (else `VARCHAR` columns look like `INTEGER`), and
+  value decode must go through the `DictionaryProvider` (`ValueAccessors.forField(vector,
+  provider)` → `DictionaryAccessor`, looked up lazily since the dictionary batch arrives with the
+  first record batch; `ArrowResultIterator.provider()` exposes the reader). `TypeMapping` also
+  still handles plain `Utf8View`/`BinaryView` (→ `VARCHAR`/`VARBINARY`) for backends/queries that
+  emit them directly; the bundled `arrow-vector` must be new enough to decode them. Verified
+  against `jeroenflvr/datapress:latest` (v0.5.0); DuckDB parity is unverified (that image can't
+  load its parquet extension offline).
 
 Error handling: every error is a flat JSON envelope `{"error": "<message>"}` (not RFC-7807; the
 `/readyz` 503 is the one exception, `{"status":"not_ready",...}`). Parse defensively; include

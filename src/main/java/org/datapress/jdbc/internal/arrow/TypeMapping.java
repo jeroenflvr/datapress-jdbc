@@ -2,8 +2,11 @@ package org.datapress.jdbc.internal.arrow;
 
 import java.sql.ResultSetMetaData;
 import java.sql.Types;
+import org.apache.arrow.vector.dictionary.Dictionary;
+import org.apache.arrow.vector.dictionary.DictionaryProvider;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.DictionaryEncoding;
 import org.apache.arrow.vector.types.pojo.Field;
 
 /**
@@ -22,6 +25,26 @@ public final class TypeMapping {
     int nullable =
         field.isNullable() ? ResultSetMetaData.columnNullable : ResultSetMetaData.columnNoNulls;
     return describe(field.getName(), type, nullable);
+  }
+
+  /**
+   * Dictionary-aware variant. A dictionary-encoded field's {@link Field#getType()} is the index
+   * type (e.g. {@code Int32}), not the logical value type; DataFusion emits string columns this
+   * way. When the field is dictionary-encoded we describe it using the dictionary value vector's
+   * type (resolved from the schema via {@code provider}), so metadata matches what the accessors
+   * actually return.
+   */
+  public static ColumnMeta of(Field field, DictionaryProvider provider) {
+    DictionaryEncoding encoding = field.getDictionary();
+    if (encoding != null && provider != null) {
+      Dictionary dictionary = provider.lookup(encoding.getId());
+      if (dictionary != null && dictionary.getVector() != null) {
+        int nullable =
+            field.isNullable() ? ResultSetMetaData.columnNullable : ResultSetMetaData.columnNoNulls;
+        return describe(field.getName(), dictionary.getVector().getField().getType(), nullable);
+      }
+    }
+    return of(field);
   }
 
   private static ColumnMeta describe(String name, ArrowType type, int nullable) {

@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import org.apache.arrow.vector.BaseIntVector;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.DateDayVector;
@@ -43,7 +44,10 @@ import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.ViewVarBinaryVector;
 import org.apache.arrow.vector.ViewVarCharVector;
+import org.apache.arrow.vector.dictionary.Dictionary;
+import org.apache.arrow.vector.dictionary.DictionaryProvider;
 import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.DictionaryEncoding;
 
 /**
  * Builds the concrete {@link ValueAccessor} for an Arrow vector. Each accessor decodes its vector's
@@ -54,6 +58,19 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 public final class ValueAccessors {
 
   private ValueAccessors() {}
+
+  /**
+   * Builds the accessor for a vector, decoding dictionary encoding when present. DataFusion returns
+   * string columns as dictionary-encoded vectors; the dictionary values arrive with the first
+   * batch, so the returned accessor resolves them lazily via the provider.
+   */
+  public static ValueAccessor forField(FieldVector v, DictionaryProvider provider) {
+    DictionaryEncoding encoding = v.getField().getDictionary();
+    if (encoding != null) {
+      return new DictionaryAccessor(v, provider, encoding.getId());
+    }
+    return forVector(v);
+  }
 
   public static ValueAccessor forVector(FieldVector v) {
     if (v instanceof VarCharVector) {
@@ -252,6 +269,42 @@ public final class ValueAccessors {
       }
       Object o = vector.getObject(row);
       return o == null ? null : o.toString();
+    }
+  }
+
+  /**
+   * Decodes a dictionary-encoded column: the vector holds integer indices into a dictionary vector
+   * supplied by the reader's provider. The dictionary is resolved lazily (it is delivered with the
+   * first record batch) and its value accessor is cached until the underlying vector changes.
+   */
+  private static final class DictionaryAccessor extends ValueAccessor {
+    private final DictionaryProvider provider;
+    private final long id;
+    private FieldVector cachedDictVector;
+    private ValueAccessor cachedValues;
+
+    DictionaryAccessor(FieldVector indices, DictionaryProvider provider, long id) {
+      super(indices);
+      this.provider = provider;
+      this.id = id;
+    }
+
+    @Override
+    public Object getObject(int row) {
+      if (vector.isNull(row)) {
+        return null;
+      }
+      Dictionary dictionary = provider == null ? null : provider.lookup(id);
+      if (dictionary == null) {
+        return null;
+      }
+      FieldVector dictVector = dictionary.getVector();
+      if (dictVector != cachedDictVector) {
+        cachedDictVector = dictVector;
+        cachedValues = forVector(dictVector);
+      }
+      long index = ((BaseIntVector) vector).getValueAsLong(row);
+      return cachedValues.getObject((int) index);
     }
   }
 }

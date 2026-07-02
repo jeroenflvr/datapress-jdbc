@@ -86,8 +86,8 @@ final class DataPressResultSet implements ResultSet {
       this.columnIndex = new HashMap<>();
       for (int i = 0; i < vectors.size(); i++) {
         FieldVector fv = vectors.get(i);
-        columns.add(TypeMapping.of(fv.getField()));
-        accessors[i] = ValueAccessors.forVector(fv);
+        columns.add(TypeMapping.of(fv.getField(), iterator.provider()));
+        accessors[i] = ValueAccessors.forField(fv, iterator.provider());
         columnIndex.putIfAbsent(fv.getField().getName().toLowerCase(java.util.Locale.ROOT), i + 1);
       }
       this.metaData = new DataPressResultSetMetaData(columns);

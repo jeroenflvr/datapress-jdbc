@@ -1,8 +1,9 @@
 # DataPress server API contract
 
-**Verified against:** DataPress **v0.4.27** (docs at https://docs.datap-rs.org,
-server repo https://github.com/jeroenflvr/datapress).
-**Last verified:** 2026-07-02.
+**Verified against:** DataPress **v0.5.0** (`jeroenflvr/datapress:latest` Docker image,
+backend DataFusion; docs served by the image at `/mkdocs`, server repo
+https://github.com/jeroenflvr/datapress).
+**Last verified:** 2026-07-02 (Phase 3, live container).
 
 This document is the **single source of truth** for the driver's view of the server.
 When the live server or docs disagree with this file, the live server wins — update
@@ -55,7 +56,7 @@ datasets failed. **`Connection.isValid()` uses `GET /readyz`.**
 ```json
 {
   "name":       "datapress-core",
-  "version":    "0.4.27",
+  "version":    "0.5.0",
   "backend":    "DuckDB | DataFusion | unknown",
   "git_sha":    "a1b2c3d4",
   "build_time": "2025-01-15T14:32:09Z",
@@ -77,8 +78,27 @@ datasets failed. **`Connection.isValid()` uses `GET /readyz`.**
 | GET | `/api/v1/datasets` | list configured datasets + metadata (JSON) | `getTables()` |
 | GET | `/api/v1/datasets/{name}/schema` | inferred schema + one sample row (JSON) | `getColumns()` |
 
-- Unknown dataset name in a URL path → `404` with `{"error":"dataset '<name>' not found"}`.
+- Unknown dataset name in a URL path → `404` with `{"error":"not found: dataset: <name>"}`.
 - These endpoints are **JSON-only** (no Arrow).
+
+**Confirmed JSON shapes (v0.5.0):**
+
+```json
+// GET /api/v1/datasets
+{ "datasets": [ { "name": "people", "rows": 4, "columns": 5 }, ... ] }
+
+// GET /api/v1/datasets/{name}/schema
+{
+  "name": "people",
+  "rows": 4,
+  "columns": [ { "name": "id", "logical": "...", "sql_type": "...", "nullable": true }, ... ],
+  "indexed": [ ... ],
+  "sample": { ... }
+}
+```
+
+- `sql_type` reflects the engine's own type name. On **DataFusion**, string columns are
+  reported as `"Dictionary(Int32, Utf8)"` (see Arrow type-emission notes below).
 
 ## Raw SQL (driver: Statement / PreparedStatement)
 
@@ -213,21 +233,40 @@ parse defensively and surface HTTP status + `error` message in the `SQLException
 | `5xx` | `58000` | `SQLNonTransientException` |
 | driver-unsupported JDBC feature | `0A000` | `SQLFeatureNotSupportedException` |
 
-## Arrow type-emission notes (feeds Phase 2 TypeMapping)
+## Arrow type-emission notes (feeds TypeMapping)
 
-- **DataFusion emits Arrow `Utf8View` (and can emit `BinaryView`) for Parquet string/
-  binary columns.** The driver's `TypeMapping` must handle `Utf8View`/`LargeUtf8`/`Utf8`
-  as `VARCHAR`, and `BinaryView`/`LargeBinary`/`Binary` as `VARBINARY`. This is a known
-  divergence between the two backends (DuckDB does not use the `*View` variants). The
-  bundled `arrow-vector` version must be new enough to decode `Utf8View`/`BinaryView`.
+- **DataFusion dictionary-encodes string columns.** For Parquet `Utf8` columns the SQL
+  Arrow stream carries a `Dictionary(indices=Int32, values=Utf8)` vector, **not** a plain
+  `Utf8`/`Utf8View` vector (verified against the `jeroenflvr/datapress:latest` image, v0.5.0).
+  Consequences for the driver:
+  - The column `Field.getType()` is the **index** type (`Int32`), so naive metadata mapping
+    would report `INTEGER`. `TypeMapping.of(Field, DictionaryProvider)` resolves the
+    **dictionary value** type from the provider and maps it to `VARCHAR`.
+  - Value decode must go through the `DictionaryProvider`: read the index, look up the
+    dictionary vector, then read the string. `ValueAccessors.forField(vector, provider)`
+    builds a `DictionaryAccessor` for dictionary-encoded vectors. The dictionary batch
+    arrives with the first record batch, so the provider is consulted lazily at read time.
+  - `ArrowResultIterator.provider()` exposes the `ArrowStreamReader` as the `DictionaryProvider`.
+- `TypeMapping` still handles plain `Utf8`/`Utf8View`/`LargeUtf8` → `VARCHAR` and
+  `Binary`/`BinaryView`/`LargeBinary` → `VARBINARY` for backends/queries that emit them
+  directly. The bundled `arrow-vector` must be new enough to decode `*View` variants.
+- Non-string types come through un-encoded as expected: `int8/16/32/64`, `float/double`,
+  `decimal128(10,2)`, `binary`, `date32[day]`, `time64[us]`, `timestamp[us]`, and
+  `timestamp[us, tz=UTC]`.
 - Otherwise follow the type-mapping table in `SKILL.md`.
 
 ## Open questions / to confirm against a live server
 
-1. Exact JSON shape of `GET /api/v1/datasets` (field names for dataset name/row count)
-   and `GET /api/v1/datasets/{name}/schema` (column name/type/nullable fields). Confirm
-   in Phase 3/4 against the `jeroenflvr/datapress` Docker image and record here.
+1. ~~Exact JSON shape of `GET /api/v1/datasets` and `GET /api/v1/datasets/{name}/schema`.~~
+   **Resolved (v0.5.0)** — see *Dataset discovery* above.
 2. Fixed catalog/schema names for `DatabaseMetaData` — `SKILL.md` proposes `datapress` /
-   `main`; confirm against whatever a future `information_schema` reports.
-3. Whether the `docker.io/jeroenflvr/datapress` image ships with the `auth` feature and
-   how to configure a static test token vs. a full OIDC flow for integration tests.
+   `main`; still to confirm against whatever a future `information_schema` reports (Phase 4).
+3. **Auth in the `jeroenflvr/datapress:latest` image:** the image ships **without** a static
+   REST auth token — auth is optional OIDC (`[auth]`, not enabled by default). There is no
+   "fixed test token" to exercise a 401 path against this image, so the integration
+   auth-failure test is **gated on an optional env var and skipped by default**.
+4. **DuckDB backend is not runnable in this image offline.** With `backend = "duckdb"` the
+   server tries to auto-install the DuckDB `parquet` extension from `extensions.duckdb.org`
+   at load time and fails (HTTP 404 / no network) before it becomes ready. Integration
+   coverage is therefore **DataFusion-only** with this image; the DuckDB leg is left for an
+   image (or environment) that bundles the extension.

@@ -133,3 +133,64 @@ Running notes per phase: what was done, decisions made, open questions.
 
 - None new. Timestamp-with-timezone currently decodes to `OffsetDateTime`; revisit `getTimestamp`
   calendar semantics if server tz metadata differs from the verified contract.
+
+## Phase 3 — Integration harness against a real server
+
+**What**
+
+- **Fixtures** (`scripts/make_fixtures.py`, run via `uv run --with pyarrow`): three committed
+  Parquet files under `src/integrationTest/resources/fixtures/` — `people` (id/name/active/score/
+  created, incl. nulls), `types` (one populated + one all-null row covering every mapped Arrow
+  type), `numbers` (20 000 rows for streaming / `max_rows`).
+- **Server bring-up:** `scripts/run-server.sh {up [datafusion|duckdb] | up-nosql | down}` runs the
+  `jeroenflvr/datapress:latest` container, mounts `src/integrationTest/resources/datasets.toml`
+  (backend rewritten per leg) + the fixtures, waits on `/readyz`, and prints the `DATAPRESS_URL`
+  to export. `up-nosql` starts a second instance with the `[sql]` block stripped (endpoint 404s).
+  `docker-compose.yml` is a DataFusion-pinned convenience equivalent.
+- **`integrationTest` suite** (`src/integrationTest/java`, gated on `DATAPRESS_URL`):
+  `ConnectionHandshakeIT` (connect/`isValid`/read-only/cached `/version`),
+  `QueryIT` (people incl. **dictionary-decoded strings**, all fixture types + null row, result-set
+  metadata, `DESCRIBE`), `StreamingAndMaxRowsIT` (client `setMaxRows`, **server-side clamp**,
+  multi-batch stream + allocator leak check), `ErrorPathsIT` (unknown-table `42xxx`; SQL-disabled
+  `0A000`, gated on `DATAPRESS_NOSQL_URL`).
+- **Verified:** `DATAPRESS_URL=jdbc:datapress://127.0.0.1:18080/ ./gradlew integrationTest` → 12
+  tests green against a live DataFusion container (SQL-disabled leg included when the second server
+  is up).
+
+**Contract corrections discovered (folded into `docs/CONTRACT.md`)**
+
+- Server is **v0.5.0** (was documented v0.4.27).
+- **DataFusion dictionary-encodes string columns** — the SQL Arrow stream carries
+  `Dictionary(Int32, Utf8)`, not `Utf8`/`Utf8View`. This is the big one: naive metadata mapping
+  reported string columns as `INTEGER` (the index type). Fixed by
+  `TypeMapping.of(Field, DictionaryProvider)` (resolves the value type for metadata) +
+  `ValueAccessors.forField(vector, provider)` / `DictionaryAccessor` (lazy provider lookup for
+  values) + `ArrowResultIterator.provider()`. Confirmed unit + integration green.
+- Confirmed JSON shapes for `GET /api/v1/datasets` and `/schema`; unknown-dataset body is
+  `{"error":"not found: dataset: <name>"}`.
+
+**Decisions / environment notes**
+
+- **Port shadowing gotcha:** a *native* `datapress` process on the host was bound to IPv4
+  `*:8080` while OrbStack published the container on IPv6 `:8080`; `curl 127.0.0.1:8080` hit the
+  native server (a different dataset) and every dataset query 400'd with "not a registered
+  dataset". Ran the integration container on **port 18080** (host process left untouched) to avoid
+  the conflict. `run-server.sh` honours `DATAPRESS_PORT` / `DATAPRESS_NOSQL_PORT`.
+- **No static REST auth** in this image (auth is optional OIDC, off by default) → the auth-failure
+  integration test has no fixed-token path here; gated on an optional env var and skipped by
+  default.
+- **DuckDB backend not runnable offline** in this image: it auto-installs the DuckDB `parquet`
+  extension from the network at load time and fails (404) before readiness. Integration coverage
+  is DataFusion-only with `jeroenflvr/datapress:latest`; the DuckDB leg is deferred to an image
+  that bundles the extension.
+- Server `max_rows` set to **10 000** in the test config so the clamp test (query 20 000-row
+  `numbers` with no client limit → exactly 10 000) also exercises **multi-batch streaming**
+  (10 000 > the ~8 192 DataFusion batch size).
+
+**Open questions**
+
+- DuckDB backend parity (string encoding + type emission) remains unverified until an image ships
+  the DuckDB parquet extension.
+- `DatabaseMetaData` catalog/schema (`datapress`/`main`) still to be confirmed against a real
+  `information_schema` in Phase 4.
+

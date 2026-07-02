@@ -1,0 +1,22 @@
+# DataPress server for local JDBC integration testing (DataFusion backend).
+#
+#   docker compose up -d
+#   DATAPRESS_URL=jdbc:datapress://127.0.0.1:8080/ ./gradlew integrationTest
+#   docker compose down
+#
+# For the DuckDB backend leg, prefer scripts/run-server.sh duckdb (it rewrites the
+# backend line); this compose file pins DataFusion for convenience.
+
+services:
+  datapress:
+    image: jeroenflvr/datapress:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./src/integrationTest/resources/datasets.toml:/etc/datapress/datasets.toml:ro
+      - ./src/integrationTest/resources/fixtures:/fixtures:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/datapress", "--version"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
